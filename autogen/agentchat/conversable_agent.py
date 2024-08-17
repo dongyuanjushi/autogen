@@ -11,8 +11,10 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, Ty
 
 from openai import BadRequestError
 
-from autogen.agentchat.chat import _post_process_carryover_item
-from autogen.exception_utils import InvalidCarryOverType, SenderRequired
+from aios.sdk.autogen.agentchat.chat import _post_process_carryover_item
+from aios.sdk.autogen.exception_utils import InvalidCarryOverType, SenderRequired
+from pyopenagi.agents.agent_process import AgentProcessFactory
+from pyopenagi.utils.chat_template import Query
 
 from .._pydantic import model_dump
 from ..cache.cache import AbstractCache
@@ -36,6 +38,7 @@ from ..runtime_logging import log_event, log_function_use, log_new_agent, loggin
 from .agent import Agent, LLMAgent
 from .chat import ChatResult, a_initiate_chats, initiate_chats
 from .utils import consolidate_chat_info, gather_usage_summary
+from pyopenagi.agents.base_agent import BaseAgent
 
 __all__ = ("ConversableAgent",)
 
@@ -44,7 +47,7 @@ logger = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class ConversableAgent(LLMAgent):
+class ConversableAgent(LLMAgent, BaseAgent):
     """(In preview) A class for generic conversable agents which can be configured as assistant or user proxy.
 
     After receiving each message, the agent will send a reply to the sender unless the msg is a termination msg.
@@ -74,11 +77,11 @@ class ConversableAgent(LLMAgent):
         human_input_mode: Literal["ALWAYS", "NEVER", "TERMINATE"] = "TERMINATE",
         function_map: Optional[Dict[str, Callable]] = None,
         code_execution_config: Union[Dict, Literal[False]] = False,
-        llm_config: Optional[Union[Dict, Literal[False]]] = None,
         default_auto_reply: Union[str, Dict] = "",
         description: Optional[str] = None,
         chat_messages: Optional[Dict[Agent, List[Dict]]] = None,
         silent: Optional[bool] = None,
+        agent_process_factory: Optional[AgentProcessFactory] = None,
     ):
         """
         Args:
@@ -130,6 +133,18 @@ class ConversableAgent(LLMAgent):
             silent (bool or None): (Experimental) whether to print the message sent. If None, will use the value of
                 silent in each function.
         """
+        if agent_process_factory:
+            self.agent_process_factory = agent_process_factory
+        self.agent_name = name
+
+        # save tool/function message
+        self.llm_config = {}
+        self.client = None if (self.llm_config is False or not agent_process_factory) else OpenAIWrapper(
+            **self.llm_config,
+            agent_process_factory=self.agent_process_factory,
+            agent_name=self.agent_name
+        )
+
         # we change code_execution_config below and we have to make sure we don't change the input
         # in case of UserProxyAgent, without this we could even change the default value {}
         code_execution_config = (
@@ -151,17 +166,6 @@ class ConversableAgent(LLMAgent):
             else (lambda x: content_str(x.get("content")) == "TERMINATE")
         )
         self.silent = silent
-        # Take a copy to avoid modifying the given dict
-        if isinstance(llm_config, dict):
-            try:
-                llm_config = copy.deepcopy(llm_config)
-            except TypeError as e:
-                raise TypeError(
-                    "Please implement __deepcopy__ method for each value class in llm_config to support deepcopy."
-                    " Refer to the docs for more details: https://microsoft.github.io/autogen/docs/topics/llm_configuration#adding-http-client-in-llm_config-for-proxy"
-                ) from e
-
-        self._validate_llm_config(llm_config)
 
         if logging_enabled():
             log_new_agent(self, locals())
@@ -252,20 +256,6 @@ class ConversableAgent(LLMAgent):
             "process_all_messages_before_reply": [],
             "process_message_before_send": [],
         }
-
-    def _validate_llm_config(self, llm_config):
-        assert llm_config in (None, False) or isinstance(
-            llm_config, dict
-        ), "llm_config must be a dict or False or None."
-        if llm_config is None:
-            llm_config = self.DEFAULT_CONFIG
-        self.llm_config = self.DEFAULT_CONFIG if llm_config is None else llm_config
-        # TODO: more complete validity check
-        if self.llm_config in [{}, {"config_list": []}, {"config_list": [{"model": ""}]}]:
-            raise ValueError(
-                "When using OpenAI or Azure OpenAI endpoints, specify a non-empty 'model' either in 'llm_config' or in each config of 'config_list'."
-            )
-        self.client = None if self.llm_config is False else OpenAIWrapper(**self.llm_config)
 
     @staticmethod
     def _is_silent(agent: Agent, silent: Optional[bool] = False) -> bool:
@@ -377,9 +367,9 @@ class ConversableAgent(LLMAgent):
                 f["reply_func"] = new_reply_func
 
     @staticmethod
-    def _get_chats_to_run(
+    def _summary_from_nested_chats(
         chat_queue: List[Dict[str, Any]], recipient: Agent, messages: Union[str, Callable], sender: Agent, config: Any
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[bool, str]:
         """A simple chat reply function.
         This function initiate one or a sequence of chats between the "recipient" and the agents in the
         chat_queue.
@@ -406,46 +396,10 @@ class ConversableAgent(LLMAgent):
             if message:
                 current_c["message"] = message
                 chat_to_run.append(current_c)
-        return chat_to_run
-
-    @staticmethod
-    def _summary_from_nested_chats(
-        chat_queue: List[Dict[str, Any]], recipient: Agent, messages: Union[str, Callable], sender: Agent, config: Any
-    ) -> Tuple[bool, Union[str, None]]:
-        """A simple chat reply function.
-        This function initiate one or a sequence of chats between the "recipient" and the agents in the
-        chat_queue.
-
-        It extracts and returns a summary from the nested chat based on the "summary_method" in each chat in chat_queue.
-
-        Returns:
-            Tuple[bool, str]: A tuple where the first element indicates the completion of the chat, and the second element contains the summary of the last chat if any chats were initiated.
-        """
-        chat_to_run = ConversableAgent._get_chats_to_run(chat_queue, recipient, messages, sender, config)
         if not chat_to_run:
             return True, None
         res = initiate_chats(chat_to_run)
         return True, res[-1].summary
-
-    @staticmethod
-    async def _a_summary_from_nested_chats(
-        chat_queue: List[Dict[str, Any]], recipient: Agent, messages: Union[str, Callable], sender: Agent, config: Any
-    ) -> Tuple[bool, Union[str, None]]:
-        """A simple chat reply function.
-        This function initiate one or a sequence of chats between the "recipient" and the agents in the
-        chat_queue.
-
-        It extracts and returns a summary from the nested chat based on the "summary_method" in each chat in chat_queue.
-
-        Returns:
-            Tuple[bool, str]: A tuple where the first element indicates the completion of the chat, and the second element contains the summary of the last chat if any chats were initiated.
-        """
-        chat_to_run = ConversableAgent._get_chats_to_run(chat_queue, recipient, messages, sender, config)
-        if not chat_to_run:
-            return True, None
-        res = await a_initiate_chats(chat_to_run)
-        index_of_last_chat = chat_to_run[-1]["chat_id"]
-        return True, res[index_of_last_chat].summary
 
     def register_nested_chats(
         self,
@@ -453,12 +407,11 @@ class ConversableAgent(LLMAgent):
         trigger: Union[Type[Agent], str, Agent, Callable[[Agent], bool], List],
         reply_func_from_nested_chats: Union[str, Callable] = "summary_from_nested_chats",
         position: int = 2,
-        use_async: Union[bool, None] = None,
         **kwargs,
     ) -> None:
         """Register a nested chat reply function.
         Args:
-            chat_queue (list): a list of chat objects to be initiated. If use_async is used, then all messages in chat_queue must have a chat-id associated with them.
+            chat_queue (list): a list of chat objects to be initiated.
             trigger (Agent class, str, Agent instance, callable, or list): refer to `register_reply` for details.
             reply_func_from_nested_chats (Callable, str): the reply function for the nested chat.
                 The function takes a chat_queue for nested chat, recipient agent, a list of messages, a sender agent and a config as input and returns a reply message.
@@ -473,33 +426,15 @@ class ConversableAgent(LLMAgent):
             ) -> Tuple[bool, Union[str, Dict, None]]:
             ```
             position (int): Ref to `register_reply` for details. Default to 2. It means we first check the termination and human reply, then check the registered nested chat reply.
-            use_async: Uses a_initiate_chats internally to start nested chats. If the original chat is initiated with a_initiate_chats, you may set this to true so nested chats do not run in sync.
             kwargs: Ref to `register_reply` for details.
         """
-        if use_async:
-            for chat in chat_queue:
-                if chat.get("chat_id") is None:
-                    raise ValueError("chat_id is required for async nested chats")
+        if reply_func_from_nested_chats == "summary_from_nested_chats":
+            reply_func_from_nested_chats = self._summary_from_nested_chats
+        if not callable(reply_func_from_nested_chats):
+            raise ValueError("reply_func_from_nested_chats must be a callable")
 
-        if use_async:
-            if reply_func_from_nested_chats == "summary_from_nested_chats":
-                reply_func_from_nested_chats = self._a_summary_from_nested_chats
-            if not callable(reply_func_from_nested_chats) or not inspect.iscoroutinefunction(
-                reply_func_from_nested_chats
-            ):
-                raise ValueError("reply_func_from_nested_chats must be a callable and a coroutine")
-
-            async def wrapped_reply_func(recipient, messages=None, sender=None, config=None):
-                return await reply_func_from_nested_chats(chat_queue, recipient, messages, sender, config)
-
-        else:
-            if reply_func_from_nested_chats == "summary_from_nested_chats":
-                reply_func_from_nested_chats = self._summary_from_nested_chats
-            if not callable(reply_func_from_nested_chats):
-                raise ValueError("reply_func_from_nested_chats must be a callable")
-
-            def wrapped_reply_func(recipient, messages=None, sender=None, config=None):
-                return reply_func_from_nested_chats(chat_queue, recipient, messages, sender, config)
+        def wrapped_reply_func(recipient, messages=None, sender=None, config=None):
+            return reply_func_from_nested_chats(chat_queue, recipient, messages, sender, config)
 
         functools.update_wrapper(wrapped_reply_func, reply_func_from_nested_chats)
 
@@ -509,9 +444,7 @@ class ConversableAgent(LLMAgent):
             position,
             kwargs.get("config"),
             kwargs.get("reset_config"),
-            ignore_async_in_sync_chat=(
-                not use_async if use_async is not None else kwargs.get("ignore_async_in_sync_chat")
-            ),
+            ignore_async_in_sync_chat=kwargs.get("ignore_async_in_sync_chat"),
         )
 
     @property
@@ -824,12 +757,13 @@ class ConversableAgent(LLMAgent):
             if "tool_calls" in message and message["tool_calls"]:
                 for tool_call in message["tool_calls"]:
                     id = tool_call.get("id", "No tool call id found")
-                    function_call = dict(tool_call.get("function", {}))
+                    # function_call = dict(tool_call.get("function", {}))
+                    function_call = tool_call
                     func_print = f"***** Suggested tool call ({id}): {function_call.get('name', '(No function name found)')} *****"
                     iostream.print(colored(func_print, "green"), flush=True)
                     iostream.print(
-                        "Arguments: \n",
-                        function_call.get("arguments", "(No arguments found)"),
+                        "Parameters: \n",
+                        function_call.get("parameters", "(No parameters found)"),
                         flush=True,
                         sep="",
                     )
@@ -1442,13 +1376,8 @@ class ConversableAgent(LLMAgent):
                     extracted_response["function_call"]["name"]
                 )
             for tool_call in extracted_response.get("tool_calls") or []:
-                tool_call["function"]["name"] = self._normalize_name(tool_call["function"]["name"])
-                # Remove id and type if they are not present.
-                # This is to make the tool call object compatible with Mistral API.
-                if tool_call.get("id") is None:
-                    tool_call.pop("id")
-                if tool_call.get("type") is None:
-                    tool_call.pop("type")
+                tool_call["name"] = self._normalize_name(tool_call["name"])
+                tool_call["function"] = {"name": tool_call["name"], "arguments": str(tool_call["parameters"])}
         return extracted_response
 
     async def a_generate_oai_reply(
@@ -1678,7 +1607,7 @@ class ConversableAgent(LLMAgent):
         message = messages[-1]
         tool_returns = []
         for tool_call in message.get("tool_calls", []):
-            function_call = tool_call.get("function", {})
+            function_call = tool_call
             func = self._function_map.get(function_call.get("name", None), None)
             if inspect.iscoroutinefunction(func):
                 try:
@@ -2296,13 +2225,7 @@ class ConversableAgent(LLMAgent):
 
         is_exec_success = False
         if func is not None:
-            # Extract arguments from a json-like string and put it into a dict.
-            input_string = self._format_json_str(func_call.get("arguments", "{}"))
-            try:
-                arguments = json.loads(input_string)
-            except json.JSONDecodeError as e:
-                arguments = None
-                content = f"Error: {e}\n The argument must be in JSON format."
+            arguments = func_call.get("parameters", None)
 
             # Try to execute the function
             if arguments is not None:
@@ -2489,41 +2412,41 @@ class ConversableAgent(LLMAgent):
         See https://platform.openai.com/docs/api-reference/chat/create#chat-create-function_call
         """
 
-        if not isinstance(self.llm_config, dict):
-            error_msg = "To update a function signature, agent must have an llm_config"
-            logger.error(error_msg)
-            raise AssertionError(error_msg)
-
-        if is_remove:
-            if "functions" not in self.llm_config.keys():
-                error_msg = "The agent config doesn't have function {name}.".format(name=func_sig)
-                logger.error(error_msg)
-                raise AssertionError(error_msg)
-            else:
-                self.llm_config["functions"] = [
-                    func for func in self.llm_config["functions"] if func["name"] != func_sig
-                ]
-        else:
-            if not isinstance(func_sig, dict):
-                raise ValueError(
-                    f"The function signature must be of the type dict. Received function signature type {type(func_sig)}"
-                )
-
-            self._assert_valid_name(func_sig["name"])
-            if "functions" in self.llm_config.keys():
-                if any(func["name"] == func_sig["name"] for func in self.llm_config["functions"]):
-                    warnings.warn(f"Function '{func_sig['name']}' is being overridden.", UserWarning)
-
-                self.llm_config["functions"] = [
-                    func for func in self.llm_config["functions"] if func.get("name") != func_sig["name"]
-                ] + [func_sig]
-            else:
-                self.llm_config["functions"] = [func_sig]
-
-        if len(self.llm_config["functions"]) == 0:
-            del self.llm_config["functions"]
-
-        self.client = OpenAIWrapper(**self.llm_config)
+        # if not isinstance(self.llm_config, dict):
+        #     error_msg = "To update a function signature, agent must have an llm_config"
+        #     logger.error(error_msg)
+        #     raise AssertionError(error_msg)
+        pass
+        # if is_remove:
+        #     if "functions" not in self.llm_config.keys():
+        #         error_msg = "The agent config doesn't have function {name}.".format(name=func_sig)
+        #         logger.error(error_msg)
+        #         raise AssertionError(error_msg)
+        #     else:
+        #         self.llm_config["functions"] = [
+        #             func for func in self.llm_config["functions"] if func["name"] != func_sig
+        #         ]
+        # else:
+        #     if not isinstance(func_sig, dict):
+        #         raise ValueError(
+        #             f"The function signature must be of the type dict. Received function signature type {type(func_sig)}"
+        #         )
+        #
+        #     self._assert_valid_name(func_sig["name"])
+        #     if "functions" in self.llm_config.keys():
+        #         if any(func["name"] == func_sig["name"] for func in self.llm_config["functions"]):
+        #             warnings.warn(f"Function '{func_sig['name']}' is being overridden.", UserWarning)
+        #
+        #         self.llm_config["functions"] = [
+        #             func for func in self.llm_config["functions"] if func.get("name") != func_sig["name"]
+        #         ] + [func_sig]
+        #     else:
+        #         self.llm_config["functions"] = [func_sig]
+        #
+        # if len(self.llm_config["functions"]) == 0:
+        #     del self.llm_config["functions"]
+        #
+        # self.client = OpenAIWrapper(**self.llm_config)
 
     def update_tool_signature(self, tool_sig: Union[str, Dict], is_remove: None):
         """update a tool_signature in the LLM configuration for tool_call.
@@ -2532,11 +2455,6 @@ class ConversableAgent(LLMAgent):
             tool_sig (str or dict): description/name of the tool to update/remove to the model. See: https://platform.openai.com/docs/api-reference/chat/create#chat-create-tools
             is_remove: whether removing the tool from llm_config with name 'tool_sig'
         """
-
-        if not self.llm_config:
-            error_msg = "To update a tool signature, agent must have an llm_config"
-            logger.error(error_msg)
-            raise AssertionError(error_msg)
 
         if is_remove:
             if "tools" not in self.llm_config.keys():
@@ -2557,17 +2475,21 @@ class ConversableAgent(LLMAgent):
                 if any(tool["function"]["name"] == tool_sig["function"]["name"] for tool in self.llm_config["tools"]):
                     warnings.warn(f"Function '{tool_sig['function']['name']}' is being overridden.", UserWarning)
                 self.llm_config["tools"] = [
-                    tool
-                    for tool in self.llm_config["tools"]
-                    if tool.get("function", {}).get("name") != tool_sig["function"]["name"]
-                ] + [tool_sig]
+                                               tool
+                                               for tool in self.llm_config["tools"]
+                                               if tool.get("function", {}).get("name") != tool_sig["function"]["name"]
+                                           ] + [tool_sig]
             else:
                 self.llm_config["tools"] = [tool_sig]
 
         if len(self.llm_config["tools"]) == 0:
             del self.llm_config["tools"]
 
-        self.client = OpenAIWrapper(**self.llm_config)
+        self.client = OpenAIWrapper(
+            **self.llm_config,
+            agent_process_factory=self.agent_process_factory,
+            agent_name=self.agent_name
+        )
 
     def can_execute_function(self, name: Union[List[str], str]) -> bool:
         """Whether the agent can execute the function."""
