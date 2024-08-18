@@ -11,8 +11,8 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, Ty
 
 from openai import BadRequestError
 
-from autogen.agentchat.chat import _post_process_carryover_item
-from autogen.exception_utils import InvalidCarryOverType, SenderRequired
+from aios.sdk.autogen.autogen.agentchat.chat import _post_process_carryover_item
+from aios.sdk.autogen.autogen.exception_utils import InvalidCarryOverType, SenderRequired
 from pyopenagi.agents.agent_process import AgentProcessFactory
 from pyopenagi.utils.chat_template import Query
 
@@ -1334,7 +1334,7 @@ class ConversableAgent(LLMAgent, BaseAgent):
         sender: Optional[Agent] = None,
         config: Optional[OpenAIWrapper] = None,
     ) -> Tuple[bool, Union[str, Dict, None]]:
-        """Generate a reply using autogen.oai."""
+        """Generate a reply using aios.sdk.autogen.autogen.oai."""
         client = self.client if config is None else config
         if client is None:
             return False, None
@@ -1386,7 +1386,7 @@ class ConversableAgent(LLMAgent, BaseAgent):
         sender: Optional[Agent] = None,
         config: Optional[Any] = None,
     ) -> Tuple[bool, Union[str, Dict, None]]:
-        """Generate a reply using autogen.oai asynchronously."""
+        """Generate a reply using aios.sdk.autogen.autogen.oai asynchronously."""
         iostream = IOStream.get_default()
 
         def _generate_oai_reply(

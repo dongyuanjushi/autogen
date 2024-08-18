@@ -35,7 +35,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessageToolCall
 from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
 from openai.types.completion_usage import CompletionUsage
 
-from autogen.oai.client_utils import validate_parameter
+from aios.sdk.autogen.autogen.oai.client_utils import validate_parameter
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:

@@ -12,7 +12,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 from typing_extensions import ParamSpec
 
-from autogen.coding.func_with_reqs import (
+from aios.sdk.autogen.autogen.coding.func_with_reqs import (
     FunctionWithRequirements,
     FunctionWithRequirementsStr,
     _build_python_functions_file,

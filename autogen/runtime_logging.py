@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, 
 from openai import AzureOpenAI, OpenAI
 from openai.types.chat import ChatCompletion
 
-from autogen.logger.base_logger import BaseLogger, LLMConfig
-from autogen.logger.logger_factory import LoggerFactory
+from aios.sdk.autogen.autogen.logger.base_logger import BaseLogger, LLMConfig
+from aios.sdk.autogen.autogen.logger.logger_factory import LoggerFactory
 
 if TYPE_CHECKING:
-    from autogen import Agent, ConversableAgent, OpenAIWrapper
-    from autogen.oai.anthropic import AnthropicClient
-    from autogen.oai.cohere import CohereClient
-    from autogen.oai.gemini import GeminiClient
-    from autogen.oai.groq import GroqClient
-    from autogen.oai.mistral import MistralAIClient
-    from autogen.oai.together import TogetherClient
+    from aios.sdk.autogen.autogen import Agent, ConversableAgent, OpenAIWrapper
+    from aios.sdk.autogen.autogen.oai.anthropic import AnthropicClient
+    from aios.sdk.autogen.autogen.oai.cohere import CohereClient
+    from aios.sdk.autogen.autogen.oai.gemini import GeminiClient
+    from aios.sdk.autogen.autogen.oai.groq import GroqClient
+    from aios.sdk.autogen.autogen.oai.mistral import MistralAIClient
+    from aios.sdk.autogen.autogen.oai.together import TogetherClient
 
 logger = logging.getLogger(__name__)
 

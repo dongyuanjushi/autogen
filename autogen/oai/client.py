@@ -9,12 +9,12 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 from flaml.automl.logger import logger_formatter
 from pydantic import BaseModel
 
-from autogen.cache import Cache
-from autogen.io.base import IOStream
-from autogen.logger.logger_utils import get_current_ts
-from autogen.oai.openai_utils import OAI_PRICE1K, get_key, is_valid_api_key
-from autogen.runtime_logging import log_chat_completion, log_new_client, log_new_wrapper, logging_enabled
-from autogen.token_count_utils import count_token
+from aios.sdk.autogen.autogen.cache import Cache
+from aios.sdk.autogen.autogen.io.base import IOStream
+from aios.sdk.autogen.autogen.logger.logger_utils import get_current_ts
+from aios.sdk.autogen.autogen.oai.openai_utils import OAI_PRICE1K, get_key, is_valid_api_key
+from aios.sdk.autogen.autogen.runtime_logging import log_chat_completion, log_new_client, log_new_wrapper, logging_enabled
+from aios.sdk.autogen.autogen.token_count_utils import count_token
 from pyopenagi.agents.agent_process import AgentProcessFactory
 from pyopenagi.agents.external_call_core import ExternalCallCore
 from pyopenagi.utils.chat_template import Query
@@ -23,7 +23,7 @@ TOOL_ENABLED = False
 try:
     import openai
 except ImportError:
-    ERROR: Optional[ImportError] = ImportError("Please install openai>=1 and diskcache to use autogen.OpenAIWrapper.")
+    ERROR: Optional[ImportError] = ImportError("Please install openai>=1 and diskcache to use aios.sdk.autogen.autogen.OpenAIWrapper.")
     OpenAI = object
     AzureOpenAI = object
 else:
@@ -46,42 +46,42 @@ else:
     ERROR = None
 
 try:
-    from autogen.oai.gemini import GeminiClient
+    from aios.sdk.autogen.autogen.oai.gemini import GeminiClient
 
     gemini_import_exception: Optional[ImportError] = None
 except ImportError as e:
     gemini_import_exception = e
 
 try:
-    from autogen.oai.anthropic import AnthropicClient
+    from aios.sdk.autogen.autogen.oai.anthropic import AnthropicClient
 
     anthropic_import_exception: Optional[ImportError] = None
 except ImportError as e:
     anthropic_import_exception = e
 
 try:
-    from autogen.oai.mistral import MistralAIClient
+    from aios.sdk.autogen.autogen.oai.mistral import MistralAIClient
 
     mistral_import_exception: Optional[ImportError] = None
 except ImportError as e:
     mistral_import_exception = e
 
 try:
-    from autogen.oai.together import TogetherClient
+    from aios.sdk.autogen.autogen.oai.together import TogetherClient
 
     together_import_exception: Optional[ImportError] = None
 except ImportError as e:
     together_import_exception = e
 
 try:
-    from autogen.oai.groq import GroqClient
+    from aios.sdk.autogen.autogen.oai.groq import GroqClient
 
     groq_import_exception: Optional[ImportError] = None
 except ImportError as e:
     groq_import_exception = e
 
 try:
-    from autogen.oai.cohere import CohereClient
+    from aios.sdk.autogen.autogen.oai.cohere import CohereClient
 
     cohere_import_exception: Optional[ImportError] = None
 except ImportError as e:

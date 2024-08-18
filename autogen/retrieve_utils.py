@@ -20,7 +20,7 @@ import chromadb.utils.embedding_functions as ef
 import pypdf
 from chromadb.api.types import QueryResult
 
-from autogen.token_count_utils import count_token
+from aios.sdk.autogen.autogen.token_count_utils import count_token
 
 try:
     from unstructured.partition.auto import partition
