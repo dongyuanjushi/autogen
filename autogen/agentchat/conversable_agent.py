@@ -11,8 +11,8 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, Ty
 
 from openai import BadRequestError
 
-from aios.sdk.autogen.agentchat.chat import _post_process_carryover_item
-from aios.sdk.autogen.exception_utils import InvalidCarryOverType, SenderRequired
+from autogen.agentchat.chat import _post_process_carryover_item
+from autogen.exception_utils import InvalidCarryOverType, SenderRequired
 from pyopenagi.agents.agent_process import AgentProcessFactory
 from pyopenagi.utils.chat_template import Query
 

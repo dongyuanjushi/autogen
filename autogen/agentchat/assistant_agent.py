@@ -1,6 +1,6 @@
 from typing import Callable, Dict, Literal, Optional, Union
 
-from aios.sdk.autogen.runtime_logging import log_new_agent, logging_enabled
+from autogen.runtime_logging import log_new_agent, logging_enabled
 
 from .conversable_agent import ConversableAgent
 
