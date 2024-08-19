@@ -354,7 +354,7 @@ class OpenAIClient:
             "model": response.model,
         }
 
-
+# extents aios call core
 class OpenAIWrapper(ExternalCallCore):
     """A wrapper class for openai client."""
 
